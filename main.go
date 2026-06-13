@@ -77,6 +77,9 @@ var (
 	userinfocache    = cache.New(5*time.Minute, 10*time.Minute)
 	lastMessageCache = cache.New(24*time.Hour, 24*time.Hour)
 	globalHTTPClient = newSafeHTTPClient()
+	
+	// Custom flags
+	headless = flag.Bool("headless", false, "Disable the static HTML frontend and run purely as an API")
 )
 
 var privateIPBlocks []*net.IPNet

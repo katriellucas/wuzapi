@@ -167,5 +167,11 @@ func (s *server) routes() {
 
 	s.router.Handle("/newsletter/list", c.Then(s.ListNewsletter())).Methods("GET")
 
-	s.router.PathPrefix("/").Handler(http.FileServer(http.Dir(exPath + "/static/")))
+	// Register custom routes
+	s.registerCustomRoutes(c)
+
+	// Headless mode
+	if !*headless {
+		s.router.PathPrefix("/").Handler(http.FileServer(http.Dir(exPath + "/static/")))
+	}
 }
