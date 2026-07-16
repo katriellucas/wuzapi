@@ -93,9 +93,9 @@ type WebhookErrorPayload struct {
 
 // ProxyConfig holds per-user proxy settings for WhatsApp and webhook delivery.
 type ProxyConfig struct {
-	Enabled         bool  `json:"enabled"`
+	Enabled         bool   `json:"enabled"`
 	ProxyURL        string `json:"proxyURL"`
-	WebhookUseProxy *bool `json:"webhookUseProxy,omitempty"`
+	WebhookUseProxy *bool  `json:"webhookUseProxy,omitempty"`
 }
 
 func resolveWebhookUseProxy(perUser *bool) bool {

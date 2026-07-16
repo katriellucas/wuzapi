@@ -925,24 +925,24 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				}
 			}
 		}
-    
-    if encMessage := evt.Message.GetSecretEncryptedMessage(); encMessage != nil {
-        decrypted, derr := mycli.WAClient.DecryptSecretEncryptedMessage(context.Background(), evt)
-        if derr != nil {
-            log.Warn().
-                Err(derr).
-                Str("messageID", evt.Info.ID).
-                Str("secretEncType", encMessage.GetSecretEncType().String()).
-                Msg("DecryptSecretEncryptedMessage failed")
-        } else if decrypted != nil {
-            log.Info().
-                Str("messageID", evt.Info.ID).
-                Str("secretEncType", encMessage.GetSecretEncType().String()).
-                Msg("Decrypted secretEncryptedMessage; swapping evt.Message")
-                evt.Message = decrypted
-        }
-    }
-    
+
+		if encMessage := evt.Message.GetSecretEncryptedMessage(); encMessage != nil {
+			decrypted, derr := mycli.WAClient.DecryptSecretEncryptedMessage(context.Background(), evt)
+			if derr != nil {
+				log.Warn().
+					Err(derr).
+					Str("messageID", evt.Info.ID).
+					Str("secretEncType", encMessage.GetSecretEncType().String()).
+					Msg("DecryptSecretEncryptedMessage failed")
+			} else if decrypted != nil {
+				log.Info().
+					Str("messageID", evt.Info.ID).
+					Str("secretEncType", encMessage.GetSecretEncType().String()).
+					Msg("Decrypted secretEncryptedMessage; swapping evt.Message")
+				evt.Message = decrypted
+			}
+		}
+
 		if !*skipMedia {
 
 			isIncoming := !evt.Info.IsFromMe
