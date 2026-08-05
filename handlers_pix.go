@@ -1,4 +1,8 @@
 // handlers_pix.go
+//
+// URUPIX custom endpoints.
+// Contains handlers that are not part of the upstream WuzAPI project.
+
 package main
 
 import (
@@ -133,7 +137,7 @@ func (s *server) SendPix() http.HandlerFunc {
 		}
 
 		// Aligned with handlers.go: Uses the standard validateMessageFields helper for parsing the JID
-		recipient, err := validateMessageFields(t.Phone, nil, nil)
+		recipient, err := validateMessageFields(r.Context(), client, t.Phone, nil, nil)
 		if err != nil {
 			s.Respond(w, r, http.StatusBadRequest, err)
 			return

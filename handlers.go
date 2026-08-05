@@ -3723,6 +3723,12 @@ func (s *server) GetContacts() http.HandlerFunc {
 			return
 		}
 
+		// --- URUPIX EXTENSION START ---
+		if r.URL.Query().Get("saved_only") == "true" {
+			result = filterSavedContacts(result)
+		}
+		// --- URUPIX EXTENSION END ---
+
 		responseJson, err := json.Marshal(result)
 		if err != nil {
 			s.Respond(w, r, http.StatusInternalServerError, err)

@@ -171,7 +171,7 @@ func (s *server) routes() {
 
 	s.router.Handle("/newsletter/list", c.Then(s.ListNewsletter())).Methods("GET")
 
-	// Register custom routes
+	// URUPIX custom routes
 	s.registerCustomRoutes(c)
 
 	// Headless mode
