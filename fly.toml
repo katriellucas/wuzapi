@@ -1,47 +1,41 @@
-# fly.toml app configuration file generated for urupix-wuzapi on 2026-08-01T23:34:39-03:00
+# fly.toml app configuration file generated for urupix-wuzapi on 2026-08-03T13:30:23Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = "urupix-wuzapi"
-primary_region = "gru"
-
-# Swap safety net for RAM spikes
+app = 'urupix-wuzapi'
+primary_region = 'gru'
+kill_signal = 'SIGINT'
+kill_timeout = '30s'
 swap_size_mb = 512
 
-# Graceful shutdown settings (gives Go time to close SQLite cleanly)
-kill_signal = "SIGINT"
-kill_timeout = 30
-
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  TZ = "America/Sao_Paulo"
-  WUZAPI_PORT = "8080"
-  SESSION_DEVICE_NAME = "Urupix WhatsApp"
-  WEBHOOK_FORMAT = "json"
+  SESSION_DEVICE_NAME = 'Urupix WhatsApp'
+  TZ = 'America/Sao_Paulo'
+  WEBHOOK_FORMAT = 'json'
+  WUZAPI_PORT = '8080'
 
-# Persistent Volume for SQLite & WhatsApp Keys
 [[mounts]]
-  source = "wuzapi_data"
-  destination = "/app/dbdata"
+  source = 'wuzapi_data'
+  destination = '/app/dbdata'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "off"   # Keeps WhatsApp connected 24/7
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
-# Health check using WuzAPI's built-in /health endpoint
-[[http_service.checks]]
-  grace_period = "10s"
-  interval = "30s"
-  method = "GET"
-  path = "/health"
-  timeout = "5s"
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/health'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'
