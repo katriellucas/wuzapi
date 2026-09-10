@@ -2708,9 +2708,9 @@ func (s *server) SetStatusMessage() http.HandlerFunc {
 			return
 		}
 
-		msg := proto.String(t.Body)
-
-		err = clientManager.GetWhatsmeowClient(txtid).SetStatusMessage(context.Background(), *msg)
+		err = clientManager.GetWhatsmeowClient(txtid).SetStatusMessage(context.Background(), types.SetStatusInput{
+			Text: proto.String(t.Body),
+		})
 		if err != nil {
 			s.Respond(w, r, http.StatusInternalServerError, errors.New(fmt.Sprintf("error sending status message: %v", err)))
 			return
