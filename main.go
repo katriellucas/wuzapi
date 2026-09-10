@@ -85,7 +85,7 @@ var (
 
 var privateIPBlocks []*net.IPNet
 
-const version = "1.0.7"
+const version = "1.0.8"
 
 // killchannel maps a userID to its session goroutine's kill channel. It is
 // accessed from HTTP request goroutines (Connect/Disconnect/logout/delete) and
@@ -271,8 +271,8 @@ func main() {
 	}
 
 	log.Info().
-		Bool("use_proxy", *globalWebhookUseProxy).
-		Msg("Webhook Proxy Configured")
+		Bool("use_proxy_when_configured", *globalWebhookUseProxy).
+		Msg("Webhook proxy routing policy configured")
 
 	log.Info().
 		Bool("enabled", *webhookRetryEnabled).
