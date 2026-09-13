@@ -17,7 +17,7 @@ import (
 )
 
 type ctaButton struct {
-	Type        string `json:"Type"` // "url", "call", "copy", "quick_reply"
+	Type        string `json:"Type"` // "cta_url", "cta_call", "cta_copy", "quick_reply"
 	DisplayText string `json:"DisplayText"`
 	Url         string `json:"Url,omitempty"`
 	PhoneNumber string `json:"PhoneNumber,omitempty"`
@@ -78,15 +78,20 @@ func (s *server) SendCTA() http.HandlerFunc {
 
 		for _, btn := range t.Buttons {
 			switch strings.ToLower(strings.TrimSpace(btn.Type)) {
-			case "quick_reply", "reply":
+			case "quick_reply":
 				hasQuickReply = true
-			case "url", "cta_url", "call", "cta_call", "copy", "cta_copy":
+			case "cta_url", "cta_call", "cta_copy":
 				hasCTA = true
 			}
 		}
 
 		if hasQuickReply && hasCTA {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("WhatsApp layout restriction: cannot mix 'quick_reply' with CTA buttons ('url', 'call', 'copy') in the same message"))
+			s.Respond(
+				w,
+				r,
+				http.StatusBadRequest,
+				errors.New("WhatsApp layout restriction: cannot mix 'quick_reply' with CTA buttons ('cta_url', 'cta_call', 'cta_copy') in the same message"),
+			)
 			return
 		}
 
@@ -112,9 +117,9 @@ func (s *server) SendCTA() http.HandlerFunc {
 			var button nativeFlowButton
 
 			switch strings.ToLower(strings.TrimSpace(btn.Type)) {
-			case "url", "cta_url":
+			case "cta_url":
 				if strings.TrimSpace(btn.Url) == "" {
-					s.Respond(w, r, http.StatusBadRequest, fmt.Errorf("button at index %d is type url but missing Url", idx))
+					s.Respond(w, r, http.StatusBadRequest, fmt.Errorf("button at index %d is type cta_url but missing Url", idx))
 					return
 				}
 
@@ -127,9 +132,9 @@ func (s *server) SendCTA() http.HandlerFunc {
 					},
 				}
 
-			case "call", "cta_call":
+			case "cta_call":
 				if strings.TrimSpace(btn.PhoneNumber) == "" {
-					s.Respond(w, r, http.StatusBadRequest, fmt.Errorf("button at index %d is type call but missing PhoneNumber", idx))
+					s.Respond(w, r, http.StatusBadRequest, fmt.Errorf("button at index %d is type cta_call but missing PhoneNumber", idx))
 					return
 				}
 
@@ -141,9 +146,9 @@ func (s *server) SendCTA() http.HandlerFunc {
 					},
 				}
 
-			case "copy", "cta_copy":
+			case "cta_copy":
 				if strings.TrimSpace(btn.CopyCode) == "" {
-					s.Respond(w, r, http.StatusBadRequest, fmt.Errorf("button at index %d is type copy but missing CopyCode", idx))
+					s.Respond(w, r, http.StatusBadRequest, fmt.Errorf("button at index %d is type cta_copy but missing CopyCode", idx))
 					return
 				}
 
@@ -155,7 +160,7 @@ func (s *server) SendCTA() http.HandlerFunc {
 					},
 				}
 
-			case "quick_reply", "reply":
+			case "quick_reply":
 				buttonID := strings.TrimSpace(btn.Id)
 				if buttonID == "" {
 					buttonID = fmt.Sprintf("btn_%d", idx)
