@@ -5,19 +5,20 @@ go 1.26.0
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.6
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.113.4
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.0
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/gorilla/mux v1.8.1
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/rs/zerolog v1.35.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-	go.mau.fi/whatsmeow v0.0.0-20260927171547-45cfce066cd2
+	go.mau.fi/whatsmeow v0.0.0-20260929112325-8b41cfe6d9c4
 	google.golang.org/protobuf v1.36.12
 )
 
 require (
 	github.com/PuerkitoBio/goquery v1.13.0
+	github.com/TA-rathnayaka/whatsmeow-antiban v0.1.0
 	github.com/justinas/alice v1.2.0
 	github.com/lib/pq v1.12.3
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
@@ -25,7 +26,7 @@ require (
 	github.com/vincent-petithory/dataurl v1.0.0
 	golang.org/x/image v0.46.0
 	golang.org/x/sync v0.23.0
-	modernc.org/sqlite v1.59.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -43,11 +44,11 @@ require (
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/elliotchance/orderedmap/v3 v3.1.1 // indirect
-	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/petermattis/goid v0.0.0-20260918085751-abfca077860b // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rs/xid v1.6.0 // indirect
-	github.com/vektah/gqlparser/v2 v2.5.58 // indirect
+	github.com/vektah/gqlparser/v2 v2.5.60 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect

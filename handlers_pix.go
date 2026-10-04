@@ -21,6 +21,7 @@ type pixRequest struct {
 	MerchantName string `json:"MerchantName"`
 	PixKey       string `json:"PixKey"`
 	PixKeyType   string `json:"PixKeyType"` // PHONE, CPF, CNPJ, EMAIL, EVP
+	Amount       int64  `json:"Amount,omitempty"`
 	Id           string `json:"Id,omitempty"`
 }
 
@@ -72,8 +73,8 @@ type paymentInfoParams struct {
 	Currency             string           `json:"currency"`
 	TotalAmount          totalAmount      `json:"total_amount"`
 	OrderRequestID       string           `json:"order_request_id"`
-	Order                orderDetails     `json:"order"`
-	Referral             string           `json:"referral"`
+	Order                *orderDetails    `json:"order,omitempty"`
+	Referral             string           `json:"referral,omitempty"`
 }
 
 func generateAlphanumericID(length int) string {
@@ -109,16 +110,19 @@ func (s *server) SendPix() http.HandlerFunc {
 			s.Respond(w, r, http.StatusBadRequest, errors.New("missing Phone"))
 			return
 		}
+
 		if t.MerchantName == "" {
 			s.Respond(w, r, http.StatusBadRequest, errors.New("missing MerchantName"))
 			return
 		}
+
 		if t.PixKey == "" {
 			s.Respond(w, r, http.StatusBadRequest, errors.New("missing PixKey"))
 			return
 		}
 
 		pixKeyType := strings.ToUpper(t.PixKeyType)
+
 		if pixKeyType == "" {
 			pixKeyType = "PHONE"
 		}
@@ -130,6 +134,7 @@ func (s *server) SendPix() http.HandlerFunc {
 		}
 
 		msgid := t.Id
+
 		if msgid == "" {
 			msgid = client.GenerateMessageID()
 		}
@@ -148,11 +153,20 @@ func (s *server) SendPix() http.HandlerFunc {
 			}},
 			Currency: "BRL",
 			TotalAmount: totalAmount{
-				Value:  0,
+				Value:  t.Amount,
 				Offset: 1000,
 			},
 			OrderRequestID: generateAlphanumericID(11),
-			Order: orderDetails{
+		}
+
+		buttonName := "review_and_pay"
+
+		if t.Amount < 10 {
+			buttonName = "payment_info"
+
+			params.TotalAmount.Value = 0
+			params.Referral = "chat_attachment"
+			params.Order = &orderDetails{
 				Status: "payment_requested",
 				Items: []orderItem{{
 					Quantity:   0,
@@ -173,19 +187,23 @@ func (s *server) SendPix() http.HandlerFunc {
 				Tax:      nil,
 				Shipping: nil,
 				Discount: nil,
-			},
-			Referral: "chat_attachment",
+			}
 		}
 
 		msg, additionalNodes, err := buildNativeFlowMessage(nativeFlowMessage{
 			Buttons: []nativeFlowButton{{
-				Name:   "payment_info",
+				Name:   buttonName,
 				Params: params,
 			}},
 			Version: 1,
 		})
 		if err != nil {
-			s.Respond(w, r, http.StatusInternalServerError, fmt.Errorf("failed to build payment message: %w", err))
+			s.Respond(
+				w,
+				r,
+				http.StatusInternalServerError,
+				fmt.Errorf("failed to build payment message: %w", err),
+			)
 			return
 		}
 
@@ -194,12 +212,18 @@ func (s *server) SendPix() http.HandlerFunc {
 			AdditionalNodes: &additionalNodes,
 		})
 		if err != nil {
-			s.Respond(w, r, http.StatusInternalServerError, fmt.Errorf("failed to send payment message: %w", err))
+			s.Respond(
+				w,
+				r,
+				http.StatusInternalServerError,
+				fmt.Errorf("failed to send payment message: %w", err),
+			)
 			return
 		}
 
 		historyStr := r.Context().Value("userinfo").(Values).Get("History")
 		historyLimit, _ := strconv.Atoi(historyStr)
+
 		s.saveOutgoingMessageToHistory(
 			txtid,
 			recipient.String(),
@@ -211,13 +235,23 @@ func (s *server) SendPix() http.HandlerFunc {
 		)
 
 		token := r.Context().Value("userinfo").(Values).Get("Token")
-		s.publishSentMessageEvent(token, txtid, txtid, recipient, msgid, msg, resp.Timestamp)
+
+		s.publishSentMessageEvent(
+			token,
+			txtid,
+			txtid,
+			recipient,
+			msgid,
+			msg,
+			resp.Timestamp,
+		)
 
 		responseJSON, _ := json.Marshal(map[string]interface{}{
 			"Details":   "Sent",
 			"Timestamp": resp.Timestamp.Unix(),
 			"Id":        msgid,
 		})
+
 		s.Respond(w, r, http.StatusOK, string(responseJSON))
 	}
 }
