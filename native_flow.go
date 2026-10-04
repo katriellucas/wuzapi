@@ -33,6 +33,7 @@ const (
 	nativeFlowProtocolUnknown nativeFlowProtocol = iota
 	nativeFlowProtocolMixed
 	nativeFlowProtocolPaymentInfo
+	nativeFlowProtocolOrderDetails
 )
 
 // buildNativeFlowMessage builds both parts required for sending a native flow:
@@ -167,6 +168,9 @@ func nativeFlowProtocolForButton(name string) nativeFlowProtocol {
 	case "payment_info":
 		return nativeFlowProtocolPaymentInfo
 
+	case "review_and_pay":
+		return nativeFlowProtocolOrderDetails
+
 	default:
 		return nativeFlowProtocolUnknown
 	}
@@ -199,6 +203,19 @@ func buildNativeFlowProtocolNodes(protocol nativeFlowProtocol) []waBinary.Node {
 				Content: []waBinary.Node{{
 					Tag:   "native_flow",
 					Attrs: waBinary.Attrs{"name": "payment_info"},
+				}},
+			}},
+		}}
+
+	case nativeFlowProtocolOrderDetails:
+		return []waBinary.Node{{
+			Tag: "biz",
+			Content: []waBinary.Node{{
+				Tag:   "interactive",
+				Attrs: waBinary.Attrs{"type": "native_flow", "v": "1"},
+				Content: []waBinary.Node{{
+					Tag:   "native_flow",
+					Attrs: waBinary.Attrs{"name": "order_details"},
 				}},
 			}},
 		}}
