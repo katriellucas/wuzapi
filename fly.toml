@@ -1,9 +1,7 @@
-# fly.toml app configuration file generated for urupix-wuzapi on 2026-08-03T13:30:23Z
-#
+# fly.toml app configuration file for alembre-wuzapi
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
 
-app = 'urupix-wuzapi'
+app = 'alembre-wuzapi'
 primary_region = 'gru'
 kill_signal = 'SIGINT'
 kill_timeout = '30s'
@@ -13,7 +11,7 @@ swap_size_mb = 512
   dockerfile = 'Dockerfile'
 
 [env]
-  SESSION_DEVICE_NAME = 'Urupix WhatsApp'
+  SESSION_DEVICE_NAME = 'Alembre - Sistema de Automação'
   TZ = 'America/Sao_Paulo'
   WEBHOOK_FORMAT = 'json'
   WUZAPI_PORT = '8080'

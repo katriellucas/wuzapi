@@ -2730,50 +2730,69 @@ func (s *server) SendMessage() http.HandlerFunc {
 		QuotedText    string         `json:"QuotedText,omitempty"`
 		QuotedMessage *waE2E.Message `json:"QuotedMessage,omitempty"`
 	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		txtid := r.Context().Value("userinfo").(Values).Get("Id")
-		if clientManager.GetWhatsmeowClient(txtid) == nil {
+
+		client := clientManager.GetWhatsmeowClient(txtid)
+		if client == nil {
 			s.Respond(w, r, http.StatusInternalServerError, errors.New("no session"))
 			return
 		}
+
 		msgid := ""
 		var resp whatsmeow.SendResponse
+
 		decoder := json.NewDecoder(r.Body)
 		var t textStruct
+
 		err := decoder.Decode(&t)
 		if err != nil {
 			s.Respond(w, r, http.StatusBadRequest, errors.New("could not decode Payload"))
 			return
 		}
+
 		if t.Phone == "" {
 			s.Respond(w, r, http.StatusBadRequest, errors.New("missing Phone in Payload"))
 			return
 		}
+
 		if t.Body == "" {
 			s.Respond(w, r, http.StatusBadRequest, errors.New("missing Body in Payload"))
 			return
 		}
-		recipient, err := validateMessageFields(r.Context(), clientManager.GetWhatsmeowClient(txtid), t.Phone, t.ContextInfo.StanzaID, t.ContextInfo.Participant)
+
+		recipient, err := validateMessageFields(
+			r.Context(),
+			client,
+			t.Phone,
+			t.ContextInfo.StanzaID,
+			t.ContextInfo.Participant,
+		)
 		if err != nil {
 			log.Error().Msg(fmt.Sprintf("%s", err))
 			s.Respond(w, r, http.StatusBadRequest, err)
 			return
 		}
+
 		if t.Id == "" {
-			msgid = clientManager.GetWhatsmeowClient(txtid).GenerateMessageID()
+			msgid = client.GenerateMessageID()
 		} else {
 			msgid = t.Id
 		}
+
 		var (
 			url string
 			og  openGraphResult
 		)
+
 		if t.LinkPreview {
 			url = extractFirstURL(t.Body)
 			if url != "" {
 				og = getOpenGraphData(r.Context(), url, txtid)
 			}
 		}
+
 		msg := &waE2E.Message{
 			ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 				Text:          proto.String(t.Body),
@@ -2783,12 +2802,18 @@ func (s *server) SendMessage() http.HandlerFunc {
 				JPEGThumbnail: og.ImageData,
 			},
 		}
-		// Upload the high-res thumbnail so clients render the large preview
-		// card; without these fields only the small inline thumbnail shows.
+
 		if len(og.HQImageData) > 0 {
-			uploaded, upErr := clientManager.GetWhatsmeowClient(txtid).Upload(r.Context(), og.HQImageData, whatsmeow.MediaLinkThumbnail)
+			uploaded, upErr := client.Upload(
+				r.Context(),
+				og.HQImageData,
+				whatsmeow.MediaLinkThumbnail,
+			)
 			if upErr != nil {
-				log.Warn().Err(upErr).Str("url", url).Msg("Failed to upload link preview thumbnail, sending inline thumbnail only")
+				log.Warn().
+					Err(upErr).
+					Str("url", url).
+					Msg("Failed to upload link preview thumbnail, sending inline thumbnail only")
 			} else {
 				etm := msg.ExtendedTextMessage
 				etm.ThumbnailDirectPath = proto.String(uploaded.DirectPath)
@@ -2800,15 +2825,15 @@ func (s *server) SendMessage() http.HandlerFunc {
 				etm.ThumbnailHeight = proto.Uint32(og.HQHeight)
 			}
 		}
+
 		if t.ContextInfo.StanzaID != nil {
 			var qm *waE2E.Message
 
-			// If QuotedMessage was provided, use it.
 			if t.QuotedMessage != nil {
 				qm = t.QuotedMessage
 			} else {
-				// Otherwise, use the old logic with QuotedText.
 				qm = &waE2E.Message{}
+
 				if t.QuotedText != "" {
 					qm.ExtendedTextMessage = &waE2E.ExtendedTextMessage{
 						Text: proto.String(t.QuotedText),
@@ -2824,41 +2849,105 @@ func (s *server) SendMessage() http.HandlerFunc {
 				QuotedMessage: qm,
 			}
 		}
+
 		if t.ContextInfo.MentionedJID != nil {
 			if msg.ExtendedTextMessage.ContextInfo == nil {
 				msg.ExtendedTextMessage.ContextInfo = &waE2E.ContextInfo{}
 			}
-			msg.ExtendedTextMessage.ContextInfo.MentionedJID = t.ContextInfo.MentionedJID
+
+			msg.ExtendedTextMessage.ContextInfo.MentionedJID =
+				t.ContextInfo.MentionedJID
 		}
-		if t.ContextInfo.IsForwarded != nil && *t.ContextInfo.IsForwarded {
+
+		if t.ContextInfo.IsForwarded != nil &&
+			*t.ContextInfo.IsForwarded {
 			if msg.ExtendedTextMessage.ContextInfo == nil {
 				msg.ExtendedTextMessage.ContextInfo = &waE2E.ContextInfo{}
 			}
-			msg.ExtendedTextMessage.ContextInfo.IsForwarded = proto.Bool(true)
+
+			msg.ExtendedTextMessage.ContextInfo.IsForwarded =
+				proto.Bool(true)
 		}
-		resp, err = clientManager.GetWhatsmeowClient(txtid).SendMessage(context.Background(), recipient, msg, whatsmeow.SendRequestExtra{ID: msgid})
+
+		err = withAntiban(
+			r.Context(),
+			client,
+			txtid,
+			recipient,
+			t.Body,
+			func() error {
+				var sendErr error
+
+				resp, sendErr = client.SendMessage(
+					context.Background(),
+					recipient,
+					msg,
+					whatsmeow.SendRequestExtra{ID: msgid},
+				)
+
+				return sendErr
+			},
+		)
+
 		if err != nil {
-			s.Respond(w, r, http.StatusInternalServerError, errors.New(fmt.Sprintf("error sending message: %v", err)))
+			if errors.Is(err, errAntibanBlocked) {
+				s.Respond(w, r, http.StatusTooManyRequests, err)
+				return
+			}
+
+			s.Respond(
+				w,
+				r,
+				http.StatusInternalServerError,
+				fmt.Errorf("error sending message: %w", err),
+			)
 			return
 		}
+
 		historyStr := r.Context().Value("userinfo").(Values).Get("History")
 		historyLimit, _ := strconv.Atoi(historyStr)
-		s.saveOutgoingMessageToHistory(txtid, recipient.String(), msgid, "text", t.Body, "", historyLimit)
 
-		// Publish sent message event to RabbitMQ
+		s.saveOutgoingMessageToHistory(
+			txtid,
+			recipient.String(),
+			msgid,
+			"text",
+			t.Body,
+			"",
+			historyLimit,
+		)
+
 		token := r.Context().Value("userinfo").(Values).Get("Token")
 		userID := r.Context().Value("userinfo").(Values).Get("Id")
-		s.publishSentMessageEvent(token, userID, txtid, recipient, msgid, msg, resp.Timestamp)
 
-		log.Info().Str("timestamp", fmt.Sprintf("%v", resp.Timestamp)).Str("id", msgid).Msg("Message sent")
-		response := map[string]interface{}{"Details": "Sent", "Timestamp": resp.Timestamp.Unix(), "Id": msgid}
+		s.publishSentMessageEvent(
+			token,
+			userID,
+			txtid,
+			recipient,
+			msgid,
+			msg,
+			resp.Timestamp,
+		)
+
+		log.Info().
+			Str("timestamp", fmt.Sprintf("%v", resp.Timestamp)).
+			Str("id", msgid).
+			Msg("Message sent")
+
+		response := map[string]interface{}{
+			"Details":   "Sent",
+			"Timestamp": resp.Timestamp.Unix(),
+			"Id":        msgid,
+		}
+
 		responseJson, err := json.Marshal(response)
 		if err != nil {
 			s.Respond(w, r, http.StatusInternalServerError, err)
-		} else {
-			s.Respond(w, r, http.StatusOK, string(responseJson))
+			return
 		}
-		return
+
+		s.Respond(w, r, http.StatusOK, string(responseJson))
 	}
 }
 
