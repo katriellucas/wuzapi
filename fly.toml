@@ -1,5 +1,7 @@
-# fly.toml app configuration file for alembre-wuzapi
+# fly.toml app configuration file generated for alembre-wuzapi on 2026-10-05T14:40:40Z
+#
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
 app = 'alembre-wuzapi'
 primary_region = 'gru'
