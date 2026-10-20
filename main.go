@@ -66,6 +66,8 @@ var (
 	mode                = flag.String("mode", "http", "Server mode: http or stdio")
 	dataDir             = flag.String("datadir", "", "Data directory for database and session files (defaults to executable directory)")
 
+	socketRecoveryEnabled = flag.Bool("socketrecovery", true, "Recover sessions after closed socket send errors")
+
 	globalHMACKeyEncrypted []byte
 	automaticPresence      = types.PresenceAvailable
 
@@ -144,6 +146,7 @@ func signalKill(userID string) {
 		log.Debug().Str("userID", userID).Msg("signalKill: no kill channel registered (already cleaned up?)")
 		return
 	}
+	clientManager.stopSocketRecovery(userID, true)
 	select {
 	case ch <- true:
 	default:
@@ -300,7 +303,7 @@ func main() {
 		Str("queue", *webhookErrorQueueName).
 		Msg("Webhook Retry Configured")
 
-	// Novo bloco para sobrescrever o osName pelo ENV, se existir
+	// Override the OS name from the environment when configured.
 	if v := os.Getenv("SESSION_DEVICE_NAME"); v != "" {
 		*osName = v
 	}
@@ -324,6 +327,14 @@ func main() {
 	}
 	automaticPresence = configuredPresence
 	log.Info().Str("presence", string(automaticPresence)).Msg("Automatic session presence configured")
+
+	if v := os.Getenv("WUZAPI_SOCKET_RECOVERY"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Invalid WUZAPI_SOCKET_RECOVERY value")
+		}
+		*socketRecoveryEnabled = enabled
+	}
 
 	if v := os.Getenv("WUZAPI_PROXY_POOL_FALLBACK"); v != "" {
 		*poolFallbackMode = v
@@ -408,7 +419,7 @@ func main() {
 				b[i] = charset[rand.Intn(len(charset))]
 			}
 			*adminToken = string(b)
-			log.Warn().Str("admin_token", *adminToken).Msg("No admin token provided, generated a random one")
+			log.Warn().Msg("No admin token provided, generated a temporary random one. Set WUZAPI_ADMIN_TOKEN or -admintoken to configure admin access.")
 		}
 	}
 
@@ -424,8 +435,8 @@ func main() {
 				b[i] = charset[rand.Intn(len(charset))]
 			}
 			*globalEncryptionKey = string(b)
-			log.Warn().Str("global_encryption_key", *globalEncryptionKey).Msg("No WUZAPI_GLOBAL_ENCRYPTION_KEY provided, generated a random one. " +
-				"SAVE THIS KEY TO YOUR .ENV FILE OR ALL ENCRYPTED DATA WILL BE LOST ON RESTART!")
+			log.Warn().Msg("No WUZAPI_GLOBAL_ENCRYPTION_KEY provided, generated a temporary random one. " +
+				"Configure a persistent WUZAPI_GLOBAL_ENCRYPTION_KEY before storing encrypted data; data encrypted with this temporary key cannot be recovered after restart.")
 		}
 	}
 
@@ -433,10 +444,10 @@ func main() {
 	if *globalWebhook == "" {
 		if v := os.Getenv("WUZAPI_GLOBAL_WEBHOOK"); v != "" {
 			*globalWebhook = v
-			log.Info().Str("global_webhook", v).Msg("Global webhook configured from environment variable")
+			log.Info().Msg("Global webhook configured from environment variable")
 		}
 	} else {
-		log.Info().Str("global_webhook", *globalWebhook).Msg("Global webhook configured from command line")
+		log.Info().Msg("Global webhook configured from command line")
 	}
 
 	// Check for global HMAC key in environment variable
@@ -452,7 +463,7 @@ func main() {
 				b[i] = charset[rand.Intn(len(charset))]
 			}
 			*globalHMACKey = string(b)
-			log.Warn().Str("global_hmac_key", *globalHMACKey).Msg("No WUZAPI_GLOBAL_HMAC_KEY provided, generated a random one")
+			log.Warn().Msg("No WUZAPI_GLOBAL_HMAC_KEY provided, generated a temporary random one. Set WUZAPI_GLOBAL_HMAC_KEY to configure webhook signature verification.")
 		}
 
 	} else {

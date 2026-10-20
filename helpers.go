@@ -24,6 +24,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"time"
 
@@ -146,6 +148,81 @@ var (
 
 )
 
+// mentionRegex locates candidates; boundaries below exclude email addresses,
+// URL paths, and numeric prefixes of longer tokens.
+var mentionRegex = regexp.MustCompile(`@(\d+)`)
+
+// extractMentionJIDs finds standalone @phone tokens in visible message text.
+func extractMentionJIDs(text string) []string {
+	matches := mentionRegex.FindAllStringSubmatchIndex(text, -1)
+	seen := make(map[string]bool)
+	var jids []string
+	for _, m := range matches {
+		// Ignore candidates anywhere inside a URL token, including paths that
+		// put an opening parenthesis immediately before the @ sign.
+		tokenStart := 0
+		if space := strings.LastIndexFunc(text[:m[0]], unicode.IsSpace); space >= 0 {
+			_, size := utf8.DecodeRuneInString(text[space:])
+			tokenStart = space + size
+		}
+		tokenEnd := len(text)
+		if end := strings.IndexFunc(text[m[1]:], unicode.IsSpace); end >= 0 {
+			tokenEnd = m[1] + end
+		}
+		token := strings.ToLower(text[tokenStart:tokenEnd])
+		if strings.Contains(token, "://") || strings.Contains(token, "www.") || strings.Contains(token, "mailto:") {
+			continue
+		}
+		if m[0] > 0 {
+			previous, _ := utf8.DecodeLastRuneInString(text[:m[0]])
+			if !unicode.IsSpace(previous) && !strings.ContainsRune("([{,;!?\"'“‘", previous) {
+				continue
+			}
+		}
+		if m[1] < len(text) {
+			next, size := utf8.DecodeRuneInString(text[m[1]:])
+			if next == '.' {
+				// A sentence-ending period is allowed, but a domain suffix is not.
+				rest := text[m[1]+size:]
+				if rest != "" {
+					after, _ := utf8.DecodeRuneInString(rest)
+					if !unicode.IsSpace(after) && !strings.ContainsRune(")]}\"'”’", after) {
+						continue
+					}
+				}
+			} else if !unicode.IsSpace(next) && !strings.ContainsRune(")]},;!?\"'”’", next) {
+				continue
+			}
+		}
+		jid := text[m[2]:m[3]] + "@s.whatsapp.net"
+		if !seen[jid] {
+			seen[jid] = true
+			jids = append(jids, jid)
+		}
+	}
+	return jids
+}
+
+// mergeMentionJIDs combines explicitly provided MentionedJID entries with
+// @phone mentions auto-detected from the message text, deduplicated.
+func mergeMentionJIDs(explicit []string, text string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, jid := range explicit {
+		if !seen[jid] {
+			seen[jid] = true
+			out = append(out, jid)
+		}
+	}
+	for _, jid := range extractMentionJIDs(text) {
+		if !seen[jid] {
+			seen[jid] = true
+			out = append(out, jid)
+		}
+	}
+	return out
+}
+
 func Find(slice []string, val string) bool {
 	for _, item := range slice {
 		if item == val {
@@ -267,7 +344,7 @@ func getOpenGraphData(ctx context.Context, urlStr string, userID string) openGra
 
 // Update entry in User map
 func updateUserInfo(values interface{}, field string, value string) interface{} {
-	log.Debug().Str("field", field).Str("value", value).Msg("User info updated")
+	log.Debug().Str("field", field).Msg("User info updated")
 	// Copy-on-write: the map inside Values is shared — it lives in
 	// userinfocache and is handed to request goroutines via the request
 	// context. Mutating it in place races with concurrent readers (Values.Get)
@@ -291,11 +368,11 @@ func callHook(myurl string, payload map[string]string, userID string) {
 
 // webhook for regular messages with HMAC
 func callHookWithHmac(myurl string, payload map[string]string, userID string, encryptedHmacKey []byte) {
-	log.Info().Str("url", myurl).Str("userID", userID).Msg("Sending POST to client with retry logic")
+	log.Info().Str("userID", userID).Msg("Sending POST to client with retry logic")
 
 	client := clientManager.GetHTTPClient(userID)
 	if client == nil {
-		log.Warn().Str("url", myurl).Str("userID", userID).Msg("HTTP client is nil for user, skipping webhook")
+		log.Warn().Str("userID", userID).Msg("HTTP client is nil for user, skipping webhook")
 		return
 	}
 
@@ -319,7 +396,6 @@ func callHookWithHmac(myurl string, payload map[string]string, userID string, en
 
 			log.Warn().
 				Int("attempt", attempt+1).
-				Str("url", myurl).
 				Dur("delay", delayDuration).
 				Msg("Retrying webhook request with exponential backoff...")
 
@@ -391,7 +467,7 @@ func callHookWithHmac(myurl string, payload map[string]string, userID string, en
 		lastError = postErr
 
 		if postErr != nil {
-			log.Error().Err(postErr).Int("attempt", attempt+1).Str("url", myurl).Msg("Webhook failed due to network/IO error")
+			log.Error().Str("error_type", fmt.Sprintf("%T", postErr)).Int("attempt", attempt+1).Msg("Webhook failed due to network/IO error")
 			continue
 		}
 
@@ -400,7 +476,6 @@ func callHookWithHmac(myurl string, payload map[string]string, userID string, en
 			log.Error().
 				Int("status", resp.StatusCode()).
 				Int("attempt", attempt+1).
-				Str("url", myurl).
 				Msg("Webhook failed due to non-2xx status code")
 
 			if !*webhookRetryEnabled {
@@ -409,12 +484,12 @@ func callHookWithHmac(myurl string, payload map[string]string, userID string, en
 			continue
 		}
 
-		log.Info().Int("status", resp.StatusCode()).Str("url", myurl).Msg("Webhook call successful")
+		log.Info().Int("status", resp.StatusCode()).Msg("Webhook call successful")
 		return
 	}
 
 	if lastError != nil {
-		log.Error().Str("url", myurl).Msg("Webhook permanently failed after all retries. Sending to error queue...")
+		log.Error().Msg("Webhook permanently failed after all retries. Sending to error queue...")
 
 		errorPayloadMap := make(map[string]interface{})
 		if p, ok := body.(map[string]string); ok {
@@ -447,11 +522,11 @@ func callHookFile(myurl string, payload map[string]string, userID string, file s
 
 // webhook for messages with file attachments and HMAC
 func callHookFileWithHmac(myurl string, payload map[string]string, userID string, file string, encryptedHmacKey []byte) error {
-	log.Info().Str("file", file).Str("url", myurl).Msg("Sending POST with retry logic")
+	log.Info().Str("file", file).Msg("Sending POST with retry logic")
 
 	client := clientManager.GetHTTPClient(userID)
 	if client == nil {
-		log.Warn().Str("url", myurl).Str("userID", userID).Msg("HTTP client is nil for user, skipping file webhook")
+		log.Warn().Str("userID", userID).Msg("HTTP client is nil for user, skipping file webhook")
 		return fmt.Errorf("http client is nil for user %s", userID)
 	}
 
@@ -477,7 +552,6 @@ func callHookFileWithHmac(myurl string, payload map[string]string, userID string
 
 			log.Warn().
 				Int("attempt", attempt+1).
-				Str("url", myurl).
 				Dur("delay", delayDuration).
 				Msg("Retrying file webhook request with exponential backoff...")
 
@@ -515,7 +589,7 @@ func callHookFileWithHmac(myurl string, payload map[string]string, userID string
 		lastError = postErr
 
 		if postErr != nil {
-			log.Error().Err(postErr).Int("attempt", attempt+1).Str("url", myurl).Msg("File webhook failed due to network/IO error")
+			log.Error().Str("error_type", fmt.Sprintf("%T", postErr)).Int("attempt", attempt+1).Msg("File webhook failed due to network/IO error")
 			continue
 		}
 
@@ -524,7 +598,6 @@ func callHookFileWithHmac(myurl string, payload map[string]string, userID string
 			log.Error().
 				Int("status", resp.StatusCode()).
 				Int("attempt", attempt+1).
-				Str("url", myurl).
 				Msg("File webhook failed due to non-2xx status code")
 
 			if !*webhookRetryEnabled {
@@ -533,12 +606,12 @@ func callHookFileWithHmac(myurl string, payload map[string]string, userID string
 			continue
 		}
 
-		log.Info().Int("status", resp.StatusCode()).Str("url", myurl).Msg("File webhook call successful")
+		log.Info().Int("status", resp.StatusCode()).Msg("File webhook call successful")
 		return nil
 	}
 
 	if lastError != nil {
-		log.Error().Str("url", myurl).Msg("File webhook permanently failed after all retries. Sending to error queue...")
+		log.Error().Msg("File webhook permanently failed after all retries. Sending to error queue...")
 
 		errorPayloadMap := make(map[string]interface{})
 		for k, v := range finalPayload {

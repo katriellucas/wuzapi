@@ -155,7 +155,7 @@ func sendToGlobalWebHook(jsonData []byte, token string, userID string) {
 	}
 
 	if *globalWebhook != "" {
-		log.Info().Str("url", *globalWebhook).Msg("Calling global webhook")
+		log.Info().Msg("Calling global webhook")
 		// Add extra information for the global webhook
 		globalData := map[string]string{
 			"jsonData":     jsonDataStr,
@@ -183,18 +183,14 @@ func sendToUserWebHookWithHmac(webhookurl string, path string, jsonData []byte, 
 		"instanceName": instance_name,
 	}
 
-	if len(jsonData) > 8192 {
-		log.Debug().
-			Str("userID", userID).
-			Str("instanceName", instance_name).
-			Int("jsonDataBytes", len(jsonData)).
-			Msg("Data being sent to webhook")
-	} else {
-		log.Debug().Interface("webhookData", data).Msg("Data being sent to webhook")
-	}
+	// Pairing events can contain QR data and passkey codes. Log metadata only.
+	log.Debug().
+		Str("userID", userID).
+		Int("jsonDataBytes", len(jsonData)).
+		Msg("Data being sent to webhook")
 
 	if webhookurl != "" {
-		log.Info().Str("url", webhookurl).Msg("Calling user webhook")
+		log.Info().Msg("Calling user webhook")
 
 		if path == "" {
 			safeGo("callHookWithHmac", func() { callHookWithHmac(webhookurl, data, userID, encryptedHmacKey) })
@@ -246,7 +242,7 @@ func getUserWebhookUrl(token string) string {
 	webhookurl := ""
 	myuserinfo, found := userinfocache.Get(token)
 	if !found {
-		log.Warn().Str("token", token).Msg("Could not call webhook as there is no user for this token")
+		log.Warn().Msg("Could not call webhook as there is no user for this token")
 	} else {
 		webhookurl = myuserinfo.(Values).Get("Webhook")
 	}
@@ -367,7 +363,7 @@ func (s *server) connectOnStartup() {
 				hmacKeyEncrypted = base64.StdEncoding.EncodeToString(hmac_key)
 			}
 
-			log.Info().Str("token", token).Msg("Connect to Whatsapp on startup")
+			log.Info().Str("userid", txtid).Msg("Connect to Whatsapp on startup")
 			v := Values{map[string]string{
 				"Id":               txtid,
 				"Name":             name,
@@ -453,98 +449,11 @@ func jidUserKey(jid string) string {
 	return strings.SplitN(userPart, ":", 2)[0]
 }
 
-// jidLookupCandidates builds JID variants to try with sqlstore.GetDevice before
-// falling back to account-key matching across all stored devices.
-func jidLookupCandidates(textjid string) []types.JID {
-	jid, ok := parseJID(textjid)
-	if !ok {
-		return nil
-	}
-
-	seen := make(map[string]struct{})
-	var candidates []types.JID
-	add := func(candidate types.JID) {
-		if candidate.IsEmpty() {
-			return
-		}
-		key := candidate.String()
-		if _, exists := seen[key]; exists {
-			return
-		}
-		seen[key] = struct{}{}
-		candidates = append(candidates, candidate)
-	}
-
-	add(jid)
-	add(jid.ToNonAD())
-
-	userOnly, _, _ := strings.Cut(jid.User, ":")
-	if userOnly != "" {
-		add(types.NewJID(userOnly, jid.Server))
-		if jid.Server == types.DefaultUserServer || jid.Server == types.HiddenUserServer {
-			add(types.NewJID(userOnly, types.DefaultUserServer))
-		}
-	}
-
-	return candidates
-}
-
 func canonicalStoreJID(deviceStore *store.Device) string {
 	if deviceStore == nil || deviceStore.ID == nil {
 		return ""
 	}
 	return deviceStore.ID.ToNonAD().String()
-}
-
-// resolveDeviceStore loads an existing WhatsApp session from sqlstore. When
-// users.jid does not exactly match whatsmeow_device.jid (common after LID/AD
-// format changes), it falls back to matching by account key so reconnect does
-// not create a fresh device and force QR scan.
-func (s *server) resolveDeviceStore(ctx context.Context, textjid string) (*store.Device, string) {
-	if textjid != "" {
-		for _, candidate := range jidLookupCandidates(textjid) {
-			deviceStore, err := container.GetDevice(ctx, candidate)
-			if err != nil {
-				log.Error().Err(err).Str("jid", candidate.String()).Msg("Failed to get device")
-				continue
-			}
-			if resolved := canonicalStoreJID(deviceStore); resolved != "" {
-				if candidate.String() != textjid {
-					log.Info().
-						Str("user_jid", textjid).
-						Str("store_jid", deviceStore.ID.String()).
-						Str("resolved_jid", resolved).
-						Msg("Resolved device by JID variant")
-				}
-				return deviceStore, resolved
-			}
-		}
-
-		key := jidUserKey(textjid)
-		if key != "" {
-			allDevices, err := container.GetAllDevices(ctx)
-			if err != nil {
-				log.Error().Err(err).Msg("Failed to list devices from store")
-			} else {
-				for _, deviceStore := range allDevices {
-					if resolved := canonicalStoreJID(deviceStore); resolved != "" && jidUserKey(resolved) == key {
-						log.Info().
-							Str("user_jid", textjid).
-							Str("store_jid", deviceStore.ID.String()).
-							Str("resolved_jid", resolved).
-							Msg("Resolved device by account key")
-						return deviceStore, resolved
-					}
-				}
-			}
-		}
-
-		log.Warn().Str("jid", textjid).Msg("No store found for jid. Creating new device")
-	} else {
-		log.Warn().Msg("No jid found. Creating new device")
-	}
-
-	return container.NewDevice(), ""
 }
 
 func (s *server) syncUserJID(userID, token, oldJID, newJID string) {
@@ -633,10 +542,12 @@ func (s *server) startClient(userID string, textjid string, token string, kill c
 	const maxConnectionRetries = 3
 	const connectionRetryBaseWait = 5 * time.Second
 
-	deviceStore, resolvedJID := s.resolveDeviceStore(ctx, textjid)
-	s.syncUserJID(userID, token, textjid, resolvedJID)
-
-	var err error
+	deviceStore, err := s.resolveDeviceStore(ctx, userID)
+	if err != nil {
+		log.Error().Err(err).Str("user_id", userID).Msg("Cannot resolve session device; refusing to select another device")
+		return
+	}
+	s.syncUserJID(userID, token, textjid, canonicalStoreJID(deviceStore))
 
 	clientLog := waLog.Stdout("Client", *waDebug, *colorOutput)
 
@@ -655,8 +566,10 @@ func (s *server) startClient(userID string, textjid string, token string, kill c
 		clientManager.DeleteWhatsmeowClient(userID)
 		clientManager.DeleteMyClient(userID)
 		clientManager.DeleteHTTPClient(userID)
-		if _, err := s.db.Exec(`UPDATE users SET qrcode='', connected=0 WHERE id=$1`, userID); err != nil {
-			log.Error().Err(err).Msg("failed to mark user disconnected on shutdown")
+		// Temporary connection failures must not disable startup reconnects.
+		// Explicit disconnects and logouts update connected separately.
+		if err := s.clearSessionQRCode(userID); err != nil {
+			log.Error().Err(err).Msg("failed to clear QR code on session shutdown")
 		}
 	}()
 
@@ -707,14 +620,14 @@ func (s *server) startClient(userID string, textjid string, token string, kill c
 	if err == nil && proxyURL != "" {
 		parsed, perr := url.Parse(proxyURL)
 		if perr != nil {
-			log.Warn().Err(perr).Str("proxy", proxyURL).Msg("Invalid proxy URL, skipping proxy setup")
+			log.Warn().Str("userid", userID).Msg("Invalid proxy URL, skipping proxy setup")
 		} else {
-			log.Info().Str("proxy", proxyURL).Bool("webhook_use_proxy", webhookUseProxy).Msg("Configuring proxy")
+			log.Info().Str("userid", userID).Bool("webhook_use_proxy", webhookUseProxy).Msg("Configuring proxy")
 
 			if parsed.Scheme == "socks5" || parsed.Scheme == "socks5h" {
 				dialer, derr := proxy.FromURL(parsed, nil)
 				if derr != nil {
-					log.Warn().Err(derr).Str("proxy", proxyURL).Msg("Failed to build SOCKS proxy dialer, skipping proxy setup")
+					log.Warn().Str("userid", userID).Msg("Failed to build SOCKS proxy dialer, skipping proxy setup")
 				} else {
 					client.SetSOCKSProxy(dialer, whatsmeow.SetProxyOptions{})
 					log.Info().Msg("SOCKS proxy configured for WhatsApp connection")
@@ -774,7 +687,7 @@ func (s *server) startClient(userID string, textjid string, token string, kill c
 						if found {
 							v := updateUserInfo(myuserinfo, "Qrcode", base64qrcode)
 							userinfocache.Set(token, v, cache.NoExpiration)
-							log.Info().Str("qrcode", base64qrcode).Msg("update cache userinfo with qr code")
+							log.Info().Msg("update cache userinfo with qr code")
 						}
 					}
 
@@ -852,7 +765,7 @@ func (s *server) startClient(userID string, textjid string, token string, kill c
 							postmap["code"] = evt.PasskeyConfirmation.Code
 							postmap["skipHandoffUX"] = evt.PasskeyConfirmation.SkipHandoffUX
 							sendEventWithWebHook(&mycli, postmap, "")
-							log.Info().Str("code", evt.PasskeyConfirmation.Code).Msg("Passkey confirmation code sent to frontend")
+							log.Info().Msg("Passkey confirmation code sent to frontend")
 						}
 					}
 				} else if evt.Event == "error" {
@@ -874,43 +787,9 @@ func (s *server) startClient(userID string, textjid string, token string, kill c
 		// Already logged in, just connect
 		log.Info().Msg("Already logged in, just connect")
 
-		// Retry logic with linear backoff
-		var lastErr error
-
-		for attempt := 0; attempt < maxConnectionRetries; attempt++ {
-			if attempt > 0 {
-				waitTime := time.Duration(attempt) * connectionRetryBaseWait
-				log.Warn().
-					Int("attempt", attempt+1).
-					Int("max_retries", maxConnectionRetries).
-					Dur("wait_time", waitTime).
-					Msg("Retrying connection after delay")
-				timer := time.NewTimer(waitTime)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
-
-			err = client.ConnectContext(ctx)
-			if ctx.Err() != nil {
-				return
-			}
-			if err == nil {
-				log.Info().
-					Int("attempt", attempt+1).
-					Msg("Successfully connected to WhatsApp")
-				break
-			}
-
-			lastErr = err
-			log.Warn().
-				Err(err).
-				Int("attempt", attempt+1).
-				Int("max_retries", maxConnectionRetries).
-				Msg("Failed to connect to WhatsApp")
+		lastErr := connectSessionWithRetry(ctx, client.ConnectContext, maxConnectionRetries, connectionRetryBaseWait)
+		if ctx.Err() != nil {
+			return
 		}
 
 		if lastErr != nil {
@@ -935,6 +814,13 @@ func (s *server) startClient(userID string, textjid string, token string, kill c
 
 	// The context watches this goroutine's own kill channel. Keep ownership
 	// through temporary disconnections until an explicit shutdown arrives.
+	if *socketRecoveryEnabled && client.Store.ID != nil {
+		recovery := newSocketRecovery(ctx, cancel, client)
+		if clientManager.registerSocketRecovery(userID, recovery) {
+			defer clientManager.removeSocketRecovery(userID, recovery)
+			recovery.run(userID, socketRecoveryGrace)
+		}
+	}
 	<-ctx.Done()
 	log.Info().Str("userid", userID).Msg("Received kill signal")
 }
@@ -982,8 +868,8 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		}
 		if mycli.WAClient.Store != nil && mycli.WAClient.Store.ID != nil {
 			connectedJID := mycli.WAClient.Store.ID.ToNonAD().String()
-			query := mycli.db.Rebind(`UPDATE users SET jid=? WHERE id=?`)
-			if _, err := mycli.db.Exec(query, connectedJID, mycli.userID); err != nil {
+			query := mycli.db.Rebind(`UPDATE users SET jid=?, device_jid=? WHERE id=?`)
+			if _, err := mycli.db.Exec(query, connectedJID, mycli.WAClient.Store.ID.String(), mycli.userID); err != nil {
 				log.Warn().Err(err).Str("user_id", mycli.userID).Msg("Failed to persist JID on connect")
 			} else if myuserinfo, found := userinfocache.Get(mycli.token); found {
 				v := updateUserInfo(myuserinfo, "Jid", connectedJID)
@@ -991,13 +877,13 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			}
 		}
 	case *events.PairSuccess:
-		log.Info().Str("userid", mycli.userID).Str("token", mycli.token).Str("ID", evt.ID.String()).Str("BusinessName", evt.BusinessName).Str("Platform", evt.Platform).Msg("QR Pair Success")
-		jidStr := evt.ID.String()
+		log.Info().Str("userid", mycli.userID).Str("ID", evt.ID.String()).Str("BusinessName", evt.BusinessName).Str("Platform", evt.Platform).Msg("QR Pair Success")
+		jidStr := evt.ID.ToNonAD().String()
 		if mycli.WAClient.Store != nil && mycli.WAClient.Store.ID != nil {
 			jidStr = mycli.WAClient.Store.ID.ToNonAD().String()
 		}
-		sqlStmt := mycli.db.Rebind(`UPDATE users SET jid=? WHERE id=?`)
-		_, err := mycli.db.Exec(sqlStmt, jidStr, mycli.userID)
+		sqlStmt := mycli.db.Rebind(`UPDATE users SET jid=?, device_jid=? WHERE id=?`)
+		_, err := mycli.db.Exec(sqlStmt, jidStr, evt.ID.String(), mycli.userID)
 		if err != nil {
 			log.Error().Err(err).Msg(sqlStmt)
 			return
@@ -1014,7 +900,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			token := myuserinfo.(Values).Get("Token")
 			v := updateUserInfo(myuserinfo, "Jid", jidStr)
 			userinfocache.Set(token, v, cache.NoExpiration)
-			log.Info().Str("jid", jidStr).Str("userid", txtid).Str("token", token).Msg("User information set")
+			log.Info().Str("jid", jidStr).Str("userid", txtid).Msg("User information set")
 		}
 
 	case *events.StreamReplaced:
@@ -1292,7 +1178,6 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 			// Only save if there's meaningful content (including delete messages)
 			if textContent != "" || mediaLink != "" || (messageType != "text" && messageType != "reaction") || messageType == "delete" {
-				// Serializar evt para JSON
 				evtJSON, err := json.Marshal(evt)
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to marshal event to JSON")
@@ -1312,11 +1197,6 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				)
 				if err != nil {
 					log.Error().Err(err).Msg("Failed to save message to history")
-				} else {
-					err = mycli.s.trimMessageHistory(mycli.userID, evt.Info.Chat.String(), historyLimit)
-					if err != nil {
-						log.Error().Err(err).Msg("Failed to trim message history")
-					}
 				}
 			} else {
 				log.Debug().Str("messageType", messageType).Str("messageID", evt.Info.ID).Msg("Skipping empty message from history")
@@ -1366,6 +1246,21 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		// Save HistorySync messages to message_history table
 		if evt.Data != nil && evt.Data.Conversations != nil {
 			go func() {
+
+				// Local retention does not control HistorySync webhook delivery.
+				// Avoid processing disabled/deleted users; each insert rechecks the
+				// setting transactionally in case it changes during this batch.
+				var limit int
+				err := mycli.db.Get(&limit, mycli.db.Rebind("SELECT COALESCE(history, 0) FROM users WHERE id=?"), mycli.userID)
+				if err != nil {
+					if err != sql.ErrNoRows {
+						log.Error().Err(err).Str("userID", mycli.userID).Msg("Failed to read HistorySync retention setting")
+					}
+					return
+				}
+				if limit <= 0 {
+					return
+				}
 
 				// Get the account owner's JID for messages sent by the instance
 				accountOwnerJID := ""
@@ -1421,6 +1316,10 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 							if chatJID.Server == types.GroupServer || chatJID.Server == types.BroadcastServer {
 								// Group message: use participant JID
 								senderJID = participantJID
+								if senderJID == "" {
+									// HistorySync may put the sender on WebMessageInfo instead of MessageKey.
+									senderJID = msg.Message.GetParticipant()
+								}
 							} else {
 								// Direct message: sender is the chat itself (chat_jid)
 								senderJID = chatJID.String()
@@ -1531,7 +1430,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 						} else {
 							if chatJID.Server == types.GroupServer || chatJID.Server == types.BroadcastServer {
 								// Group: use participant JID
-								participant := messageKey.GetParticipant()
+								participant := senderJID
 								if participant != "" {
 									var pErr error
 									senderJIDForInfo, pErr = types.ParseJID(participant)
@@ -1649,6 +1548,11 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			log.Error().Err(err).Msg(sqlStmt)
 			return
 		}
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := mycli.s.deleteSessionDevice(cleanupCtx, mycli.userID); err != nil {
+			log.Error().Err(err).Str("user_id", mycli.userID).Msg("Failed to remove logged-out device store")
+		}
+		cleanupCancel()
 	case *events.ChatPresence:
 		postmap["type"] = "ChatPresence"
 		dowebhook = 1
@@ -1787,7 +1691,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		postmap["code"] = evt.Code
 		postmap["skipHandoffUX"] = evt.SkipHandoffUX
 		dowebhook = 1
-		log.Info().Str("code", evt.Code).Bool("skipHandoffUX", evt.SkipHandoffUX).Msg("Passkey confirmation received")
+		log.Info().Bool("skipHandoffUX", evt.SkipHandoffUX).Msg("Passkey confirmation received")
 	case *events.PairPasskeyError:
 		postmap["type"] = "PairPasskeyError"
 		postmap["error"] = evt.Error.Error()
