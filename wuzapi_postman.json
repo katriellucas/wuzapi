@@ -2,10 +2,123 @@
   "info": {
     "_postman_id": "b275f9a7-7fd5-4197-b5de-4e3a9c9d2d78",
     "name": "WuzAPI Complete Collection",
-    "description": "REST API for interacting with WhatsApp using the whatsmeow library.",
+    "description": "REST API for interacting with WhatsApp using the whatsmeow library. Message send Phone fields accept international phone digits (optional leading +), full phone JIDs (@s.whatsapp.net), LID JIDs (@lid), and group JIDs (@g.us) where supported. Preserve the full chat JID when replying. Bare numeric IDs use cached PN/LID mappings with a phone-number fallback; use a full JID if ambiguous. Usernames and Cloud API BSUIDs are not supported destinations. See API.md for full destination rules.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
+    {
+      "name": "Web Client",
+      "item": [
+        {
+          "name": "List Conversations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "token",
+                "value": "{{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chat/conversations?limit=100&offset=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat",
+                "conversations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "User-scoped stored history; requires enabled history. See webclient/README.md for pagination."
+          },
+          "response": []
+        },
+        {
+          "name": "Read Message Page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "token",
+                "value": "{{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chat/messages?chat_jid=777@lid&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "chat_jid",
+                  "value": "777@lid"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "User-scoped stored history; requires enabled history. See webclient/README.md for pagination."
+          },
+          "response": []
+        },
+        {
+          "name": "Send Browser Voice Recording",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "token",
+                "value": "{{token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "Phone",
+                  "value": "777@lid",
+                  "type": "text"
+                },
+                {
+                  "key": "Audio",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chat/send/voice",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chat",
+                "send",
+                "voice"
+              ]
+            },
+            "description": "Requires FFmpeg/libopus. Up to 16 MiB input; converts to OGG/Opus capped at five minutes. Existing JSON audio endpoints are unchanged."
+          },
+          "response": []
+        }
+      ]
+    },
     {
       "name": "Admin",
       "item": [
@@ -981,6 +1094,39 @@
           },
           "response": []
         },
+          {
+            "name": "Send Carousel",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "token",
+                  "value": "{{token}}"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n  \"Phone\": \"15555550100\",\n  \"Body\": \"Choose a destination\",\n  \"Cards\": [\n    {\n      \"Body\": \"Summit\",\n      \"Image\": \"https://example.com/summit.jpg\",\n      \"Buttons\": [\n        {\n          \"type\": \"reply\",\n          \"title\": \"Choose\",\n          \"id\": \"summit\"\n        }\n      ]\n    },\n    {\n      \"Body\": \"Coast\",\n      \"Image\": \"https://example.com/coast.png\",\n      \"Buttons\": [\n        {\n          \"type\": \"cta_url\",\n          \"title\": \"Details\",\n          \"url\": \"https://example.com/coast\"\n        }\n      ]\n    }\n  ]\n}"
+              },
+              "url": {
+                "raw": "{{baseUrl}}/chat/send/carousel",
+                "host": [
+                  "{{baseUrl}}"
+                ],
+                "path": [
+                  "chat",
+                  "send",
+                  "carousel"
+                ]
+              },
+              "description": "Send one native carousel with 2-10 image cards to a direct PN/LID chat. Replace sample image URLs. Reply IDs must be explicit and unique across cards. Transport ACK does not prove display. Pinned whatsmeow loses interactive nodes on recipient retry receipts; see API.md. Never automatically replay uncertain sends."
+            },
+            "response": []
+          },
           {
             "name": "Send Buttons - Reply Only (max 3)",
             "request": {
