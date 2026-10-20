@@ -2,6 +2,8 @@ dbdata/
 files/
 wuzapi
 .env
+.env.*
+!.env.sample
 .tool-versions
 *.exe
 
