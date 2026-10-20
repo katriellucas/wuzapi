@@ -17,6 +17,7 @@ swap_size_mb = 512
   TZ = 'America/Sao_Paulo'
   WEBHOOK_FORMAT = 'json'
   WUZAPI_PORT = '8080'
+  WUZAPI_AUTO_PRESENCE = 'unavailable'
 
 [[mounts]]
   source = 'wuzapi_data'
