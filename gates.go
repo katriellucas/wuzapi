@@ -128,8 +128,6 @@ func (g *botGate) afterSendFailed(now time.Time) {
 	g.health.RecordFailedMessage(now)
 }
 
-
-
 func withAntiban(
 	ctx context.Context,
 	client *whatsmeow.Client,
@@ -140,7 +138,6 @@ func withAntiban(
 ) error {
 	gate := gateFor(txtid)
 
-	// --- MAX WAIT CAP ---
 	const maxWait = 5 * time.Second
 
 	delay, err := gate.beforeSend(recipient, content, time.Now())
@@ -148,12 +145,12 @@ func withAntiban(
 		return err
 	}
 
+	started := time.Now()
+
+	// --- MAX WAIT CAP: pacing ---
 	if delay > maxWait {
 		delay = maxWait
 	}
-	// --- END MAX WAIT CAP ---
-
-	started := time.Now()
 
 	if delay > 0 {
 		timer := time.NewTimer(delay)
@@ -165,8 +162,9 @@ func withAntiban(
 		case <-timer.C:
 		}
 	}
+	// --- END MAX WAIT CAP ---
 
-	// --- MAX WAIT CAP ---
+	// --- MAX WAIT CAP: typing ---
 	remaining := maxWait - time.Since(started)
 
 	if remaining > 0 {
@@ -176,7 +174,7 @@ func withAntiban(
 
 		err = antiban.ExecuteTypingPlan(typingCtx, plan, func(state string) error {
 			return client.SendChatPresence(
-				context.Background(),
+				typingCtx,
 				recipient,
 				types.ChatPresence(state),
 				types.ChatPresenceMedia(""),
