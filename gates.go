@@ -128,6 +128,8 @@ func (g *botGate) afterSendFailed(now time.Time) {
 	g.health.RecordFailedMessage(now)
 }
 
+
+
 func withAntiban(
 	ctx context.Context,
 	client *whatsmeow.Client,
@@ -138,33 +140,62 @@ func withAntiban(
 ) error {
 	gate := gateFor(txtid)
 
+	// --- MAX WAIT CAP ---
+	const maxWait = 5 * time.Second
+
 	delay, err := gate.beforeSend(recipient, content, time.Now())
 	if err != nil {
 		return err
 	}
 
+	if delay > maxWait {
+		delay = maxWait
+	}
+	// --- END MAX WAIT CAP ---
+
+	started := time.Now()
+
 	if delay > 0 {
 		timer := time.NewTimer(delay)
+		defer timer.Stop()
 
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
 		}
 	}
 
-	plan := gate.typingPlan(content)
+	// --- MAX WAIT CAP ---
+	remaining := maxWait - time.Since(started)
 
-	err = antiban.ExecuteTypingPlan(ctx, plan, func(state string) error {
-		return client.SendChatPresence(
-			context.Background(),
-			recipient,
-			types.ChatPresence(state),
-			types.ChatPresenceMedia(""),
-		)
-	})
-	if err != nil {
+	if remaining > 0 {
+		typingCtx, cancel := context.WithTimeout(ctx, remaining)
+
+		plan := gate.typingPlan(content)
+
+		err = antiban.ExecuteTypingPlan(typingCtx, plan, func(state string) error {
+			return client.SendChatPresence(
+				context.Background(),
+				recipient,
+				types.ChatPresence(state),
+				types.ChatPresenceMedia(""),
+			)
+		})
+
+		cancel()
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+	}
+	// --- END MAX WAIT CAP ---
+
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
